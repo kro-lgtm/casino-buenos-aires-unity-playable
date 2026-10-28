@@ -2834,9 +2834,11 @@ var style = document.getElementById('playable-smoke-gold');
 var urls = style && style.textContent.match(/data:image\/webp;base64,[A-Za-z0-9+\/=]+/g);
 if (!urls) return;
 var ANG = [-90, -52, -128, -18, -162, -6, -174, -72, -108, -40, -140, -30, -150, -96];
+var SPARK_ANG = [-95, -60, -130, -25, -155, -5, -175, -80, -110, -30, -150, -45, -140, -70, -110, -15, -170, -70, -120, -45, -135, -35, -150, -90, -88, -15, -100, -55, -125, -5, -165, -60, -120, -90];
 var CX = 0, CY = -300, W = 1250;
 var SIZE = W * 0.5, R0 = W * 0.08, R1 = W * 0.44;
-var layer = null, puffs = [], nextTry = 0;
+var SPARK_R0 = W * 0.2, SPARK_LEN = W * 0.25, SPARK_DOT = W * 0.16;
+var layer = null, puffs = [], sparks = [], nextTry = 0;
 function findApp() {
 var sc = document.querySelector('[class^="StageContainer-"]');
 if (!sc) return null;
@@ -2874,6 +2876,29 @@ if (p < 0.18) return (p / 0.18) * 0.92;
 if (p < 0.62) return 0.92 - ((p - 0.18) / 0.44) * 0.32;
 return 0.6 * (1 - (p - 0.62) / 0.38);
 }
+function sparkAlpha(p) {
+if (p < 0.08) return p / 0.08;
+if (p < 0.3) return 1 - ((p - 0.08) / 0.22) * 0.3;
+if (p < 0.42) return 0.7 + ((p - 0.3) / 0.12) * 0.3;
+if (p < 0.7) return 1 - ((p - 0.42) / 0.28) * 0.15;
+return 0.85 * (1 - (p - 0.7) / 0.3);
+}
+function glowCanvas(w, h, rx, ry) {
+var c = document.createElement('canvas');
+c.width = w;
+c.height = h;
+var g = c.getContext('2d');
+var passes = [[14, 'rgba(255,90,0,1)'], [14, 'rgba(255,90,0,1)'], [6, '#ffb01c'], [0, '']];
+for (var i = 0; i < passes.length; i++) {
+g.shadowBlur = passes[i][0];
+g.shadowColor = passes[i][1] || 'transparent';
+g.fillStyle = '#fff4c4';
+g.beginPath();
+g.ellipse(w / 2, h / 2, rx, ry, 0, 0, Math.PI * 2);
+g.fill();
+}
+return c;
+}
 function install() {
 var app = findApp();
 if (!app) return false;
@@ -2899,6 +2924,25 @@ a: a * Math.PI / 180,
 spin: (i % 3 === 2 ? -70 : 80) * Math.PI / 180,
 dur: 7 + (i % 4) * 0.6,
 delay: (i * 0.57) % 8
+};
+});
+var streak = Texture.from(glowCanvas(72, 40, 12, 2.4));
+var dot = Texture.from(glowCanvas(40, 40, 4, 4));
+sparks = SPARK_ANG.map(function (a, i) {
+var isDot = i % 3 === 2;
+var s = new Sprite(isDot ? dot : streak);
+s.anchor.set(0.5);
+s.alpha = 0;
+s.blendMode = typeof s.blendMode === 'number' ? 1 : 'add';
+s.rotation = a * Math.PI / 180;
+layer.addChild(s);
+return {
+s: s,
+a: a * Math.PI / 180,
+k: (isDot ? SPARK_DOT : SPARK_LEN) / (isDot ? 40 : 72),
+r1: W * (i % 2 ? 0.66 : 0.81),
+dur: 1.8 + (i % 5) * 0.35,
+delay: (i * 0.29) % 3
 };
 });
 joker.parent.addChildAt(layer, joker.parent.getChildIndex(joker));
@@ -2928,6 +2972,16 @@ q.s.y = CY + Math.sin(q.a) * r;
 q.s.rotation = q.a + q.spin * e;
 q.s.scale.set(k);
 q.s.alpha = q.s.texture.valid === false ? 0 : alphaAt(p);
+}
+for (var j = 0; j < sparks.length; j++) {
+var z = sparks[j];
+var sp = ((t + z.delay) % z.dur) / z.dur;
+var se = 1 - Math.pow(1 - sp, 2.6);
+var sr = SPARK_R0 + (z.r1 - SPARK_R0) * se;
+z.s.x = CX + Math.cos(z.a) * sr;
+z.s.y = CY + Math.sin(z.a) * sr;
+z.s.scale.set(z.k * (1.1 - 0.65 * se));
+z.s.alpha = sparkAlpha(sp);
 }
 layer.visible = layer.__joker.visible;
 }
