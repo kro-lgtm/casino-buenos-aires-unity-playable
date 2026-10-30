@@ -2954,12 +2954,6 @@ layer.__joker = joker;
 layer.__app = app;
 layer.__Sprite = Sprite;
 layer.__Texture = Texture;
-if (app.ticker && !app.__endJokerLate) {
-app.__endJokerLate = true;
-app.ticker.add(function () {
-if (layer && layer.__joker) fitEndJoker(layer.__joker);
-}, null, -1000);
-}
 return true;
 }
 function brandLogo() {
@@ -3054,67 +3048,58 @@ mark.style.width = v[2];
 mark.style.height = v[3];
 mark.style.display = 'block';
 }
-// Landscape end card: the character fills the upper-centre circle and sits on the screen midline.
-var END_GROW = 2;
-function jokerScreen(joker) {
-var app = layer && layer.__app;
-var view = app && app.view;
-if (!view || !app.screen) return null;
-var b = joker.getBounds();
-var cs = window.getComputedStyle(view);
-var origin = (cs.transformOrigin || '0 0').split(' ');
-var ox = parseFloat(origin[0]) || 0;
-var oy = parseFloat(origin[1]) || 0;
-var mm = (cs.transform || '').match(/matrix\(([^)]+)\)/);
-var p = mm ? mm[1].split(',') : ['1', '0', '0', '1', '0', '0'];
-var a = parseFloat(p[0]), c = parseFloat(p[2]), e = parseFloat(p[4]);
-var b2 = parseFloat(p[1]), d = parseFloat(p[3]), f = parseFloat(p[5]);
-var sw = app.screen.width || 1, sh = app.screen.height || 1;
-var cw = parseFloat(cs.width) || sw, ch = parseFloat(cs.height) || sh;
-var lx = (b.x + b.width / 2) / sw * cw;
-var ly = (b.y + b.height / 2) / sh * ch;
-return {
-x: ox + a * (lx - ox) + c * (ly - oy) + e,
-y: oy + b2 * (lx - ox) + d * (ly - oy) + f,
-css: a || 1
-};
+// Landscape end card: the win-screen joker (bells, ring) lives on the second PIXI canvas.
+// BUST_X/Y is the centre of its painted art in spine units (bells x441-643, cap..collar y62-198 at k=0.179).
+var BUST_X = -11, BUST_Y = -502, BUST_TOP = 0.184, bustApp = null, bustTry = 0;
+function topApp() {
+var sc = document.querySelectorAll('[class^="StageContainer-"]');
+for (var i = 0; i < sc.length; i++) {
+for (var k in sc[i]) {
+if (k.indexOf('__reactProps') !== 0) continue;
+try {
+var app = sc[i][k].children.ref.current.app;
+var top = app && app.stage && app.stage.children[0];
+if (top && top.name === 'Top Canvas') return app;
+} catch (e) {}
 }
-function fitEndJoker(joker) {
-if (!joker || joker.destroyed) return;
-var on = window.innerWidth > window.innerHeight && document.documentElement.hasAttribute('data-win-cta');
-if (on) {
-var cur = joker.scale.x;
-if (!joker.__endGrow) {
-joker.__endBase = cur;
-joker.__endX = joker.x;
-joker.__endY = joker.y;
-joker.__endGrow = END_GROW;
-joker.scale.set(cur * END_GROW);
-} else if (Math.abs(cur - joker.__endBase * END_GROW) > 0.02) {
-joker.__endBase = cur;
-joker.scale.set(cur * END_GROW);
 }
-var sc = jokerScreen(joker);
-if (!sc) return;
-// Bounds sit left of the painted face. Keep the game's vertical place (the circled band) and pull the face onto the screen midline.
-var tx = window.innerWidth * 0.5 - window.innerHeight * 0.08;
-var ty = sc.y;
-var wt = joker.worldTransform;
-var sx = (wt.a || 1) * sc.css;
-var sy = (wt.d || 1) * sc.css;
-if (Math.abs(sx) < 0.001) sx = 0.001;
-if (Math.abs(sy) < 0.001) sy = 0.001;
-var dx = (tx - sc.x) / sx;
-var dy = (ty - sc.y) / sy;
-if (Math.abs(tx - sc.x) > 1.5) joker.x += dx;
-if (Math.abs(ty - sc.y) > 1.5) joker.y += dy;
-} else if (joker.__endGrow) {
-if (Math.abs(joker.scale.x - joker.__endBase * joker.__endGrow) < 0.02) joker.scale.set(joker.__endBase);
-joker.x = joker.__endX;
-joker.y = joker.__endY;
-joker.__endGrow = 0;
-joker.__endBase = null;
+return null;
 }
+function winBust(app) {
+var ws = app.stage.children[0] && app.stage.children[0].children[0];
+if (!ws || ws.name !== 'WinScreen') return null;
+for (var i = 0; i < ws.children.length; i++) {
+var sp = ws.children[i].children && ws.children[i].children[0];
+if (sp && sp.skeleton && sp.skeleton.findSlot && sp.skeleton.findSlot('cap_01_02')) return ws.children[i];
+}
+return null;
+}
+function fitWinBust() {
+if ((!bustApp || !bustApp.stage) && performance.now() >= bustTry) {
+bustTry = performance.now() + 400;
+bustApp = topApp();
+}
+var app = bustApp;
+if (!app || !app.view || !app.screen) return;
+var c = winBust(app);
+if (!c) return;
+if (window.innerWidth <= window.innerHeight) {
+if (c.__bustBase) {
+c.x = c.__bustBase[0];
+c.y = c.__bustBase[1];
+c.__bustBase = null;
+}
+return;
+}
+if (!c.__bustBase) c.__bustBase = [c.x, c.y];
+var r = app.view.getBoundingClientRect();
+var kx = r.width / (app.screen.width || r.width), ky = r.height / (app.screen.height || r.height);
+var g = c.children[0].toGlobal({ x: BUST_X, y: BUST_Y });
+var pw = c.parent.worldTransform;
+var ex = window.innerWidth * 0.5 - (r.left + g.x * kx);
+var ey = window.innerHeight * BUST_TOP - (r.top + g.y * ky);
+if (Math.abs(ex) > 0.5) c.x += ex / ((pw.a || 1) * kx);
+if (Math.abs(ey) > 0.5) c.y += ey / ((pw.d || 1) * ky);
 }
 function frame() {
 if (layer && (!layer.parent || layer.__joker.parent !== layer.parent || layer.__joker.destroyed)) {
@@ -3150,9 +3135,9 @@ z.s.y = CY + Math.sin(z.a) * sr;
 z.s.scale.set(z.k * (1.1 - 0.65 * se));
 z.s.alpha = sparkAlpha(sp);
 }
-fitEndJoker(layer.__joker);
 layer.visible = document.documentElement.hasAttribute('data-win-cta') ? false : layer.__joker.visible;
 }
+fitWinBust();
 placeMark();
 requestAnimationFrame(frame);
 }
