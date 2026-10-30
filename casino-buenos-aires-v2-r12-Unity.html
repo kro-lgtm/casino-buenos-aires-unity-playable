@@ -2696,6 +2696,49 @@ audio.muted = root.getAttribute("data-playable-muted") === "true";
 })();
 </script><script id="playable-jugar-burst-js">
 (function () {
+var looks = [
+["rgba(255,90,0,1)", "#ffb01c", "#fff4c4"],
+["rgba(255,150,20,1)", "#ffd77a", "#ffffff"],
+["rgba(230,60,0,1)", "#ff8a1c", "#ffe2a0"]
+];
+var SW = 44, SH = 12, DS = 16, GAP = 16;
+// One atlas (>= 256px so Chrome keeps it on the GPU) instead of small per-look canvases.
+var atlas = document.createElement("canvas");
+atlas.width = 256;
+atlas.height = 256;
+var ag = atlas.getContext("2d");
+function glow(x, y, w, h, rx, ry, look) {
+var passes = [[6, look[0]], [6, look[0]], [3, look[1]], [0, ""]];
+ag.save();
+ag.beginPath();
+ag.rect(x, y, w, h);
+ag.clip();
+for (var i = 0; i < passes.length; i++) {
+ag.shadowBlur = passes[i][0];
+ag.shadowColor = passes[i][1] || "transparent";
+ag.fillStyle = look[2];
+ag.beginPath();
+ag.ellipse(x + w / 2, y + h / 2, rx, ry, 0, 0, Math.PI * 2);
+ag.fill();
+}
+ag.restore();
+}
+var cells = { streak: [], dot: [] };
+for (var s = 0; s < looks.length; s++) {
+var sy0 = GAP + s * (SH + GAP);
+glow(GAP, sy0, SW, SH, 14, 2.2, looks[s]);
+cells.streak.push([GAP, sy0]);
+var dx0 = GAP + s * (DS + GAP);
+var dy0 = GAP + looks.length * (SH + GAP);
+glow(dx0, dy0, DS, DS, 3, 3, looks[s]);
+cells.dot.push([dx0, dy0]);
+}
+var sheet = atlas;
+if (window.createImageBitmap) {
+try {
+window.createImageBitmap(atlas).then(function (b) { sheet = b; }, function () {});
+} catch (e) {}
+}
 window.__playableJugarBurst = function (done) {
 if (window.__playableBurstOn) return;
 window.__playableBurstOn = true;
@@ -2703,8 +2746,8 @@ var hand = document.getElementById("playable-hand");
 if (hand) hand.style.display = "none";
 var vw = window.innerWidth || 360;
 var vh = window.innerHeight || 640;
-var dpr = window.devicePixelRatio || 1;
-if (dpr > 2) dpr = 2;
+// 2200 glowing sprites are fill-rate bound on weak phones; the soft glow does not need retina resolution.
+var dpr = 1;
 var canvas = document.createElement("canvas");
 canvas.id = "playable-burst";
 canvas.width = Math.round(vw * dpr);
@@ -2713,11 +2756,6 @@ canvas.style.width = vw + "px";
 canvas.style.height = vh + "px";
 document.body.appendChild(canvas);
 var ctx = canvas.getContext("2d");
-var palette = [
-[126, 182, 226], [159, 208, 238], [79, 154, 212], [215, 236, 248],
-[240, 212, 138], [230, 193, 90], [255, 231, 164], [201, 160, 60],
-[255, 255, 255], [246, 249, 255]
-];
 var btn = document.getElementById("loader-start");
 var rect = btn ? btn.getBoundingClientRect() : null;
 var ox = rect ? rect.left + rect.width / 2 : vw * 0.5;
@@ -2729,7 +2767,7 @@ var tx = dx > 0 ? (vw - sx) / dx : (dx < 0 ? -sx / dx : 1e9);
 var ty = dy > 0 ? (vh - sy) / dy : (dy < 0 ? -sy / dy : 1e9);
 return tx < ty ? tx : ty;
 }
-var bits = [];
+var sparks = [];
 var count = 2200;
 var i;
 for (i = 0; i < count; i++) {
@@ -2738,29 +2776,23 @@ var py = -20 + Math.random() * (vh + 40) - oy;
 var pl = Math.sqrt(px * px + py * py) || 1;
 var dx = px / pl;
 var dy = py / pl;
+var look = Math.random();
 var sx = ox + dx * bw * 0.5 * Math.random();
 var sy = oy + dy * bh * 0.5 * Math.random();
-var depth = 0.65 + Math.random() * 0.7;
-var c = palette[(Math.random() * palette.length) | 0];
-bits.push({
+sparks.push({
 sx: sx,
 sy: sy,
 dx: dx,
 dy: dy,
 reach: edge(dx, dy, sx, sy) + 30 + Math.random() * 40,
-delay: Math.pow(Math.random(), 1.3) * 0.5,
-travel: 0.3 + Math.random() * 0.25,
-w: (6 + Math.random() * 5) * depth,
-h: (13 + Math.random() * 11) * depth,
-rot: Math.random() * 6.283185,
-spin: (Math.random() - 0.5) * 12,
-flip: Math.random() * 6.283185,
-flipSpeed: (8 + Math.random() * 18) * (Math.random() < 0.5 ? -1 : 1),
-twist: 3 + Math.random() * 6,
-wobble: (Math.random() - 0.5) * 50,
-r: c[0],
-g: c[1],
-b: c[2]
+delay: Math.pow(Math.random(), 1.3) * 0.4,
+travel: 0.55 + Math.random() * 0.5,
+dot: Math.random() < 0.3,
+img: look < 0.55 ? 0 : (look < 0.8 ? 1 : 2),
+size: 0.6 + Math.random() * 0.7,
+drop: 50 + Math.random() * 80,
+phase: Math.random() * 6.283185,
+flicker: 18 + Math.random() * 22
 });
 }
 var flashR = (vw > vh ? vw : vh) * 0.42;
@@ -2768,61 +2800,65 @@ var t0 = Date.now();
 function tick() {
 var now = (Date.now() - t0) / 1000;
 ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+ctx.globalCompositeOperation = "source-over";
 ctx.clearRect(0, 0, vw, vh);
 if (now < 0.32) {
 var k = now / 0.32;
 var fr = flashR * (0.25 + 0.75 * (1 - (1 - k) * (1 - k)));
 var grad = ctx.createRadialGradient(ox, oy, 0, ox, oy, fr);
 grad.addColorStop(0, "rgba(255,250,225," + (0.95 * (1 - k)) + ")");
-grad.addColorStop(0.35, "rgba(255,221,120," + (0.55 * (1 - k)) + ")");
-grad.addColorStop(1, "rgba(255,221,120,0)");
+grad.addColorStop(0.35, "rgba(255,190,80," + (0.55 * (1 - k)) + ")");
+grad.addColorStop(1, "rgba(255,170,60,0)");
 ctx.globalAlpha = 1;
 ctx.fillStyle = grad;
 ctx.fillRect(0, 0, vw, vh);
 }
+ctx.globalCompositeOperation = "lighter";
 var alive = false;
 var j;
-for (j = 0; j < bits.length; j++) {
-var b = bits[j];
-var t = now - b.delay;
+for (j = 0; j < sparks.length; j++) {
+var p = sparks[j];
+var t = now - p.delay;
 if (t < 0) { alive = true; continue; }
-var u = t / b.travel;
+var u = t / p.travel;
 if (u >= 1) continue;
 alive = true;
-var ease = u * (1.35 - 0.35 * u);
-var dist = b.reach * ease;
-var wob = b.wobble * Math.sin(u * 3.14159);
-var x = b.sx + b.dx * dist - b.dy * wob;
-var y = b.sy + b.dy * dist + b.dx * wob + 40 * u * u;
+var rest = 1 - u;
+var dist = p.reach * (1 - Math.pow(rest, 1.8));
+var fall = p.drop * u * u;
+var x = p.sx + p.dx * dist;
+var y = p.sy + p.dy * dist + fall;
 if (x < -40 || x > vw + 40 || y < -40 || y > vh + 40) continue;
-var fa = b.flip + b.flipSpeed * t;
-var f = Math.cos(fa);
-var af = f < 0 ? -f : f;
-var sy3 = af < 0.07 ? 0.07 : af;
-if (f < 0) sy3 = -sy3;
-var sx3 = 0.75 + 0.25 * Math.abs(Math.cos(b.flip * 0.5 + b.twist * t));
-var shade = 0.42 + 0.58 * af;
-if (f < 0) shade *= 0.8;
-var ra = b.rot + b.spin * t;
-var cr = Math.cos(ra);
-var sr = Math.sin(ra);
-ctx.setTransform(dpr * cr * sx3, dpr * sr * sx3, -dpr * sr * sy3, dpr * cr * sy3, dpr * x, dpr * y);
-ctx.globalAlpha = u < 0.06 ? u / 0.06 : 1;
-ctx.fillStyle = "rgb(" + ((b.r * shade) | 0) + "," + ((b.g * shade) | 0) + "," + ((b.b * shade) | 0) + ")";
-ctx.fillRect(-b.w / 2, -b.h / 2, b.w, b.h);
-var spec = f > 0 ? Math.pow(f, 6) : 0;
-if (spec > 0.08) {
-ctx.globalAlpha = spec * 0.75;
-ctx.fillStyle = "#ffffff";
-ctx.fillRect(-b.w / 2, -b.h / 2, b.w, b.h * 0.38);
+var push = p.reach * 1.8 * Math.pow(rest, 0.8) / p.travel;
+var vx = p.dx * push;
+var vy = p.dy * push + 2 * p.drop * u / p.travel;
+var speed = Math.sqrt(vx * vx + vy * vy) || 1;
+var a = (u < 0.04 ? u / 0.04 : 1) * (u < 0.5 ? 1 : (1 - u) * 2) * (0.65 + 0.35 * Math.sin(p.phase + p.flicker * t));
+if (a <= 0.02) continue;
+ctx.globalAlpha = a > 1 ? 1 : a;
+var cell;
+if (p.dot) {
+var ds = p.size * (1.15 - 0.35 * u);
+cell = cells.dot[p.img];
+ctx.setTransform(dpr * ds, 0, 0, dpr * ds, dpr * x, dpr * y);
+ctx.drawImage(sheet, cell[0], cell[1], DS, DS, -DS / 2, -DS / 2, DS, DS);
+} else {
+var len = speed * 0.02;
+if (len < 9) len = 9;
+if (len > 40) len = 40;
+var lx = len * p.size / 28;
+var ly = p.size * (1.1 - 0.3 * u);
+var cx = vx / speed;
+var cy = vy / speed;
+cell = cells.streak[p.img];
+ctx.setTransform(dpr * cx * lx, dpr * cy * lx, -dpr * cy * ly, dpr * cx * ly, dpr * x, dpr * y);
+ctx.drawImage(sheet, cell[0], cell[1], SW, SH, -SW / 2, -SH / 2, SW, SH);
 }
-ctx.globalAlpha = 0.28;
-ctx.fillStyle = "#000000";
-ctx.fillRect(-b.w / 2, b.h * 0.32, b.w, b.h * 0.18);
 }
 ctx.setTransform(1, 0, 0, 1, 0, 0);
 ctx.globalAlpha = 1;
-if (alive && now < 1.5) window.setTimeout(tick, 16);
+ctx.globalCompositeOperation = "source-over";
+if (alive && now < 1.7) window.setTimeout(tick, 16);
 else if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
 }
 tick();
