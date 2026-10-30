@@ -2621,12 +2621,15 @@ window.setTimeout(function () {
 if (el.parentNode) el.parentNode.removeChild(el);
 }, 2500);
 }
-function layer(id, scale, vw, vh) {
+// The stage CSS gives every canvas the opaque hall background (!important): the bottom spark layer
+// keeps it as the transition backdrop, the fruit layer above it has to stay see-through.
+function layer(id, scale, vw, vh, clear) {
 var c = document.createElement('canvas');
 c.id = id;
 c.width = Math.round(vw * scale);
 c.height = Math.round(vh * scale);
-c.style.cssText = 'position:fixed;top:0;left:0;width:' + vw + 'px;height:' + vh + 'px;z-index:75;pointer-events:none';
+c.style.cssText = 'position:fixed;top:0;left:0;width:' + vw + 'px;height:' + vh + 'px;z-index:75;pointer-events:none' +
+(clear ? ';background:none!important' : '');
 document.body.appendChild(c);
 return c;
 }
@@ -2638,12 +2641,12 @@ var ox = vw * 0.5;
 var oy = vh * 0.48;
 var base = Math.min(vw, vh);
 var fx = window.__playableSparkFx;
-var sparkCanvas = layer('playable-bonus-sparks', 1, vw, vh);
+var sparkCanvas = layer('playable-bonus-sparks', 1, vw, vh, false);
 var sctx = sparkCanvas.getContext('2d');
 var sparks = fx && sctx ? fx.spawn({ vw: vw, vh: vh, ox: ox, oy: oy, rx: base * 0.06, ry: base * 0.06, count: 2200 }) : [];
 var dpr = window.devicePixelRatio || 1;
 if (dpr > 2) dpr = 2;
-var canvas = layer('playable-bonus-burst', dpr, vw, vh);
+var canvas = layer('playable-bonus-burst', dpr, vw, vh, true);
 var ctx = canvas.getContext('2d');
 if (!ctx || !sctx) {
 if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
@@ -2676,16 +2679,20 @@ var flashR = (vw > vh ? vw : vh) * 0.45;
 var g = base * 2.3;
 var t0 = Date.now();
 var last = t0;
+// The game builds the bonus scene while this runs; a capped clock slows the sparks down
+// during long frames instead of letting them burn out unseen.
+var sparkTime = 0;
 function tick() {
 var nowMs = Date.now();
 var now = (nowMs - t0) / 1000;
 var dt = (nowMs - last) / 1000;
 if (dt > 0.05) dt = 0.05;
 last = nowMs;
+sparkTime += dt;
 sctx.setTransform(1, 0, 0, 1, 0, 0);
 sctx.clearRect(0, 0, vw, vh);
-if (now < 0.36) {
-var k = now / 0.36;
+if (sparkTime < 0.36) {
+var k = sparkTime / 0.36;
 var fr = flashR * (0.25 + 0.75 * (1 - (1 - k) * (1 - k)));
 var grad = sctx.createRadialGradient(ox, oy, 0, ox, oy, fr);
 grad.addColorStop(0, 'rgba(255,250,225,' + (0.95 * (1 - k)) + ')');
@@ -2695,7 +2702,7 @@ sctx.globalAlpha = 1;
 sctx.fillStyle = grad;
 sctx.fillRect(0, 0, vw, vh);
 }
-var alive = sparks.length ? fx.draw(sctx, sparks, now, vw, vh) : false;
+var alive = sparks.length ? fx.draw(sctx, sparks, sparkTime, vw, vh) : false;
 ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 ctx.clearRect(0, 0, vw, vh);
 var drag = Math.pow(0.3, dt);
